@@ -79,40 +79,78 @@ public class KeyboardService implements KeyListener {
             initializeKeyCodeMap();
             logger.info("按鍵監聽器初始化成功");
 
-            // 啟動 ESC 鍵監聽線程
-            startEscKeyMonitor();
+            // 啟動按鍵監聽
+            startKeyMonitor();
         } catch (Exception e) {
             logger.error("初始化失敗: {}", e.getMessage());
         }
     }
 
-    private void startEscKeyMonitor() {
+    private void startKeyMonitor() {
+        if (keyMonitorThread != null && keyMonitorThread.isAlive()) {
+            return;
+        }
+
+        logger.info("開始監控按鍵事件");
+        long startTime = System.currentTimeMillis();
         keyMonitorThread = new Thread(() -> {
             while (!Thread.currentThread().isInterrupted()) {
                 try {
-                    // 檢查 ESC 鍵是否被按下
-                    if ((user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0) {
-                        if (isPlaying) {
-                            logger.info("檢測到 ESC 鍵按下，停止播放");
-                            stopPlayback();
-                        }
-                        // 等待按鍵釋放
-                        while ((user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0) {
-                            Thread.sleep(50);
+                    // 檢查所有按鍵狀態
+                    for (Map.Entry<String, Integer> entry : keyCodeMap.entrySet()) {
+                        String key = entry.getKey();
+                        int vKey = entry.getValue();
+                        short keyState = user32.GetAsyncKeyState(vKey);
+                        boolean isPressed = (keyState & 0x8000) != 0;
+                        Boolean wasPressed = keyStates.get(vKey);
+
+                        if (isPressed && (wasPressed == null || !wasPressed)) {
+                            // 按鍵按下
+                            long currentTime = System.currentTimeMillis();
+                            long relativeTime = currentTime - startTime;
+                            
+                            if (isRecording) {
+                                logger.info("[錄製中] 時間: {}ms, 按鍵: {}, 動作: PRESS", relativeTime, key);
+                                recordKeyPress(vKey);
+                            } else {
+                                logger.debug("時間: {}ms, 按鍵: {}, 動作: PRESS", relativeTime, key);
+                            }
+                            
+                            // 如果是 ESC 鍵且正在播放，則停止播放
+                            if (key.equals("Escape") && isPlaying) {
+                                logger.info("檢測到 ESC 鍵按下，停止播放");
+                                stopPlayback();
+                            }
+                            
+                            keyStates.put(vKey, true);
+                        } else if (!isPressed && wasPressed != null && wasPressed) {
+                            // 按鍵釋放
+                            long currentTime = System.currentTimeMillis();
+                            long relativeTime = currentTime - startTime;
+                            
+                            if (isRecording) {
+                                logger.info("[錄製中] 時間: {}ms, 按鍵: {}, 動作: RELEASE", relativeTime, key);
+                                recordKeyRelease(vKey);
+                            } else {
+                                logger.debug("時間: {}ms, 按鍵: {}, 動作: RELEASE", relativeTime, key);
+                            }
+                            
+                            keyStates.put(vKey, false);
                         }
                     }
-                    Thread.sleep(50);  // 每 50ms 檢查一次
+                    Thread.sleep(10); // 10ms 的輪詢間隔
                 } catch (InterruptedException e) {
+                    logger.info("按鍵監控執行緒被中斷");
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    logger.error("ESC 鍵監聽發生錯誤: {}", e.getMessage());
+                    logger.error("按鍵監控發生錯誤: {}", e.getMessage());
                 }
             }
+            logger.info("停止監控按鍵事件");
         });
         keyMonitorThread.setDaemon(true);
         keyMonitorThread.start();
-        logger.info("ESC 鍵監聽線程已啟動");
     }
 
     @PreDestroy
@@ -287,70 +325,6 @@ public class KeyboardService implements KeyListener {
         }
     }
 
-    private void startKeyMonitor() {
-        if (keyMonitorThread != null && keyMonitorThread.isAlive()) {
-            return;
-        }
-
-        logger.info("開始監控按鍵事件");
-        long startTime = System.currentTimeMillis();
-        keyMonitorThread = new Thread(() -> {
-            while (isRecording && !Thread.currentThread().isInterrupted()) {
-                for (Map.Entry<String, Integer> entry : keyCodeMap.entrySet()) {
-                    String key = entry.getKey();
-                    int vKey = entry.getValue();
-                    short keyState = user32.GetAsyncKeyState(vKey);
-                    boolean isPressed = (keyState & 0x8000) != 0;
-                    Boolean wasPressed = keyStates.get(vKey);
-
-                    if (isPressed && (wasPressed == null || !wasPressed)) {
-                        // 按鍵按下
-                        long currentTime = System.currentTimeMillis();
-                        long relativeTime = currentTime - startTime;
-                        logger.info("時間: {}ms, 按鍵: {}, 動作: PRESS", relativeTime, key);
-                        recordKeyPress(vKey);
-                        keyStates.put(vKey, true);
-                    } else if (!isPressed && wasPressed != null && wasPressed) {
-                        // 按鍵釋放
-                        long currentTime = System.currentTimeMillis();
-                        long relativeTime = currentTime - startTime;
-                        logger.info("時間: {}ms, 按鍵: {}, 動作: RELEASE", relativeTime, key);
-                        recordKeyRelease(vKey);
-                        keyStates.put(vKey, false);
-                    }
-                }
-                try {
-                    Thread.sleep(10); // 10ms 的輪詢間隔
-                } catch (InterruptedException e) {
-                    logger.info("按鍵監控執行緒被中斷");
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-            logger.info("停止監控按鍵事件");
-        });
-        keyMonitorThread.setDaemon(true); // 設置為守護執行緒
-        keyMonitorThread.start();
-    }
-
-    private void stopKeyMonitor() {
-        if (keyMonitorThread != null) {
-            try {
-                keyMonitorThread.interrupt();
-                keyMonitorThread.join(1000); // 等待執行緒結束，最多等待1秒
-                if (keyMonitorThread.isAlive()) {
-                    logger.warn("按鍵監控執行緒未能在指定時間內結束");
-                }
-            } catch (InterruptedException e) {
-                logger.error("等待按鍵監控執行緒結束時被中斷");
-                Thread.currentThread().interrupt();
-            } finally {
-                keyMonitorThread = null;
-                keyStates.clear();
-            }
-        }
-    }
-
     public void startRecording() {
         if (isRecording) {
             logger.warn("已經在錄製中");
@@ -359,8 +333,8 @@ public class KeyboardService implements KeyListener {
 
         recordedEvents.clear();
         isRecording = true;
-        startKeyMonitor();
-        logger.info("開始錄製鍵盤事件");
+        logger.info("=== 開始錄製鍵盤事件 ===");
+        logger.info("當前已記錄的事件數: {}", recordedEvents.size());
     }
 
     public List<KeyEvent> stopRecording() {
@@ -370,8 +344,19 @@ public class KeyboardService implements KeyListener {
         }
 
         isRecording = false;
-        stopKeyMonitor();
-        logger.info("停止錄製鍵盤事件，共錄製 {} 個事件", recordedEvents.size());
+        logger.info("=== 停止錄製鍵盤事件 ===");
+        logger.info("總共錄製了 {} 個事件", recordedEvents.size());
+        
+        // 輸出所有錄製的事件
+        for (int i = 0; i < recordedEvents.size(); i++) {
+            KeyEvent event = recordedEvents.get(i);
+            logger.info("事件 {}: 時間={}ms, 按鍵={}, 動作={}", 
+                i + 1, 
+                event.getTimestamp(), 
+                event.getKey(), 
+                event.getAction());
+        }
+        
         return new ArrayList<>(recordedEvents);
     }
 
@@ -386,11 +371,6 @@ public class KeyboardService implements KeyListener {
             return;
         }
 
-        if (keyText.equals("Escape")) {
-            logger.debug("忽略 Escape 鍵按下事件");
-            return;
-        }
-
         if (!currentPressedKeys.contains(keyText)) {
             currentPressedKeys.add(keyText);
             KeyEvent event = new KeyEvent();
@@ -398,6 +378,7 @@ public class KeyboardService implements KeyListener {
             event.setKey(keyText);
             event.setAction("PRESS");
             recordedEvents.add(event);
+            logger.debug("記錄按鍵按下: {}", keyText);
         }
     }
 
@@ -412,11 +393,6 @@ public class KeyboardService implements KeyListener {
             return;
         }
 
-        if (keyText.equals("Escape")) {
-            logger.debug("忽略 Escape 鍵釋放事件");
-            return;
-        }
-
         if (currentPressedKeys.contains(keyText)) {
             currentPressedKeys.remove(keyText);
             KeyEvent event = new KeyEvent();
@@ -424,6 +400,7 @@ public class KeyboardService implements KeyListener {
             event.setKey(keyText);
             event.setAction("RELEASE");
             recordedEvents.add(event);
+            logger.debug("記錄按鍵釋放: {}", keyText);
         }
     }
 
