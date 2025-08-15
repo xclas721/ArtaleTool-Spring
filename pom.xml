@@ -63,6 +63,43 @@
 					</excludes>
 				</configuration>
 			</plugin>
+			
+			<!-- Spotless Maven Plugin for code formatting -->
+			<plugin>
+				<groupId>com.diffplug.spotless</groupId>
+				<artifactId>spotless-maven-plugin</artifactId>
+				<version>2.43.0</version>
+				<configuration>
+					<java>
+						<!-- 使用 Google Java Format -->
+						<googleJavaFormat>
+							<version>1.19.2</version>
+							<style>GOOGLE</style>
+						</googleJavaFormat>
+						<!-- 移除未使用的 import -->
+						<removeUnusedImports />
+						<!-- 自定義 import 順序 -->
+						<importOrder>
+							<order>java,javax,org,com,</order>
+						</importOrder>
+						<!-- 自定義 license header -->
+						<licenseHeader>
+							<content>/*
+ * Copyright (c) 2024 ArtaleTool
+ * All rights reserved.
+ */</content>
+						</licenseHeader>
+					</java>
+				</configuration>
+				<executions>
+					<execution>
+						<goals>
+							<goal>check</goal>
+						</goals>
+						<phase>compile</phase>
+					</execution>
+				</executions>
+			</plugin>
 		</plugins>
 	</build>
 </project>
