@@ -92,6 +92,20 @@ public class WindowController {
     }
   }
 
+  @PostMapping("/bring-to-front-direct")
+  public ResponseEntity<String> bringWindowToFrontDirect(@RequestParam long windowHandle) {
+    try {
+      boolean success = windowService.bringWindowToFrontDirect(windowHandle);
+      if (success) {
+        return ResponseEntity.ok("視窗已帶到前台");
+      } else {
+        return ResponseEntity.badRequest().body("無法將視窗帶到前台，視窗可能已被關閉");
+      }
+    } catch (Exception e) {
+      return ResponseEntity.internalServerError().body("將視窗帶到前台時發生錯誤: " + e.getMessage());
+    }
+  }
+
   @GetMapping("/find-by-title")
   public ResponseEntity<WindowInfo> findWindowByTitle(@RequestParam String title) {
     try {

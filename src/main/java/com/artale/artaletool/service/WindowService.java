@@ -170,6 +170,23 @@ public class WindowService {
     return false;
   }
 
+  /** 直接將指定視窗帶到前台 */
+  public boolean bringWindowToFrontDirect(long windowHandle) {
+    try {
+      HWND hWnd = new HWND(new Pointer(windowHandle));
+      if (user32.IsWindow(hWnd)) {
+        user32.BringWindowToTop(hWnd);
+        user32.SetForegroundWindow(hWnd);
+        logger.info("視窗已直接帶到前台: handle={}", windowHandle);
+        return true;
+      }
+      return false;
+    } catch (Exception e) {
+      logger.error("直接將視窗帶到前台失敗: {}", e.getMessage());
+      return false;
+    }
+  }
+
   /** 檢查當前活動視窗是否為鎖定的視窗 */
   public boolean isLockedWindowActive() {
     if (lockedWindow == null) {
