@@ -64,6 +64,10 @@ public class WindowController {
       status.put("lockedWindowTitle", windowService.getLockedWindowTitle());
       status.put("isLockedWindowActive", windowService.isLockedWindowActive());
 
+      // 新增：視窗大小位置鎖定狀態
+      status.put("isWindowSizePositionLocked", windowService.isWindowSizePositionLocked());
+      status.put("lockedSizePositionWindowTitle", windowService.getLockedSizePositionWindowTitle());
+
       WindowInfo lockedWindowInfo = windowService.getLockedWindowInfo();
       status.put("lockedWindowInfo", lockedWindowInfo);
 
@@ -171,6 +175,42 @@ public class WindowController {
       }
     } catch (Exception e) {
       return ResponseEntity.internalServerError().body("修改視窗大小時發生錯誤: " + e.getMessage());
+    }
+  }
+
+  @PostMapping("/lock-size-position")
+  public ResponseEntity<String> lockWindowSizePosition(@RequestParam long windowHandle) {
+    try {
+      boolean success = windowService.lockWindowSizePosition(windowHandle);
+      if (success) {
+        return ResponseEntity.ok("視窗大小位置鎖定成功");
+      } else {
+        return ResponseEntity.badRequest().body("視窗大小位置鎖定失敗");
+      }
+    } catch (Exception e) {
+      return ResponseEntity.internalServerError().body("鎖定視窗大小位置時發生錯誤: " + e.getMessage());
+    }
+  }
+
+  @PostMapping("/unlock-size-position")
+  public ResponseEntity<String> unlockWindowSizePosition() {
+    try {
+      windowService.unlockWindowSizePosition();
+      return ResponseEntity.ok("視窗大小位置解鎖成功");
+    } catch (Exception e) {
+      return ResponseEntity.internalServerError().body("解鎖視窗大小位置時發生錯誤: " + e.getMessage());
+    }
+  }
+
+  @GetMapping("/size-position-status")
+  public ResponseEntity<Map<String, Object>> getSizePositionStatus() {
+    try {
+      Map<String, Object> status = new HashMap<>();
+      status.put("isSizePositionLocked", windowService.isWindowSizePositionLocked());
+      status.put("lockedSizePositionWindowTitle", windowService.getLockedSizePositionWindowTitle());
+      return ResponseEntity.ok(status);
+    } catch (Exception e) {
+      return ResponseEntity.internalServerError().build();
     }
   }
 }

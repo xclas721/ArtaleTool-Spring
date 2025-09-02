@@ -15,4 +15,5 @@ public class WindowInfo {
   private boolean isActive; // 是否為活動視窗
   private int x, y; // 視窗位置
   private int width, height; // 視窗大小
+  private boolean isSizePositionLocked; // 視窗大小位置是否被鎖定
 }

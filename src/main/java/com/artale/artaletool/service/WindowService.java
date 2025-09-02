@@ -26,6 +26,14 @@ public class WindowService {
   private HWND lockedWindow = null;
   private String lockedWindowTitle = null;
 
+  // 新增：鎖定視窗大小位置的相關變數
+  private boolean isWindowSizePositionLocked = false;
+  private RECT originalWindowRect = null;
+  private HWND lockedSizePositionWindow = null;
+  private String lockedSizePositionWindowTitle = null;
+  private Thread windowMonitorThread = null;
+  private boolean isMonitoring = false;
+
   public interface User32 extends com.sun.jna.platform.win32.User32 {
     User32 INSTANCE = Native.load("user32", User32.class, W32APIOptions.DEFAULT_OPTIONS);
 
@@ -62,6 +70,8 @@ public class WindowService {
             if (windowInfo != null && !windowInfo.getTitle().isEmpty()) {
               // 檢查是否為當前活動視窗
               windowInfo.setActive(hWnd.equals(foregroundWindow));
+              // 檢查是否為大小位置鎖定的視窗
+              windowInfo.setSizePositionLocked(hWnd.equals(lockedSizePositionWindow));
               windows.add(windowInfo);
             }
           }
@@ -211,11 +221,148 @@ public class WindowService {
         .orElse(null);
   }
 
+  /** 鎖定視窗大小和位置 */
+  public boolean lockWindowSizePosition(long windowHandle) {
+    try {
+      HWND hWnd = new HWND(new Pointer(windowHandle));
+      if (user32.IsWindow(hWnd)) {
+        // 如果已經有鎖定的視窗，先解鎖
+        if (isWindowSizePositionLocked) {
+          unlockWindowSizePosition();
+        }
+
+        // 獲取當前視窗位置和大小
+        RECT rect = new RECT();
+        if (user32.GetWindowRect(hWnd, rect)) {
+          // 儲存原始位置和大小
+          originalWindowRect = new RECT();
+          originalWindowRect.left = rect.left;
+          originalWindowRect.top = rect.top;
+          originalWindowRect.right = rect.right;
+          originalWindowRect.bottom = rect.bottom;
+
+          // 設定鎖定狀態
+          isWindowSizePositionLocked = true;
+          lockedSizePositionWindow = hWnd; // 儲存被鎖定的視窗句柄
+
+          // 開始監控視窗
+          startWindowMonitoring(hWnd);
+
+          WindowInfo windowInfo = getWindowInfo(hWnd);
+          String windowTitle = windowInfo != null ? windowInfo.getTitle() : "未知視窗";
+          lockedSizePositionWindowTitle = windowTitle;
+          logger.info("視窗大小位置已鎖定: {}", windowTitle);
+          return true;
+        }
+      }
+      return false;
+    } catch (Exception e) {
+      logger.error("鎖定視窗大小位置失敗: {}", e.getMessage());
+      return false;
+    }
+  }
+
+  /** 解鎖視窗大小和位置 */
+  public void unlockWindowSizePosition() {
+    if (isWindowSizePositionLocked) {
+      logger.info("視窗大小位置已解鎖: {}", lockedSizePositionWindowTitle);
+      isWindowSizePositionLocked = false;
+      lockedSizePositionWindow = null;
+      lockedSizePositionWindowTitle = null;
+      originalWindowRect = null;
+      stopWindowMonitoring();
+    }
+  }
+
+  /** 檢查視窗大小位置是否已鎖定 */
+  public boolean isWindowSizePositionLocked() {
+    return isWindowSizePositionLocked;
+  }
+
+  /** 獲取鎖定大小位置的視窗標題 */
+  public String getLockedSizePositionWindowTitle() {
+    return lockedSizePositionWindowTitle;
+  }
+
+  /** 開始監控視窗位置和大小 */
+  private void startWindowMonitoring(HWND hWnd) {
+    if (isMonitoring) {
+      return;
+    }
+
+    isMonitoring = true;
+    windowMonitorThread =
+        new Thread(
+            () -> {
+              while (isMonitoring && isWindowSizePositionLocked) {
+                try {
+                  // 檢查視窗是否仍然存在
+                  if (!user32.IsWindow(hWnd)) {
+                    logger.info("鎖定的視窗已關閉，自動解鎖");
+                    unlockWindowSizePosition();
+                    break;
+                  }
+
+                  // 獲取當前視窗位置和大小
+                  RECT currentRect = new RECT();
+                  if (user32.GetWindowRect(hWnd, currentRect)) {
+                    // 檢查位置或大小是否有變更
+                    if (currentRect.left != originalWindowRect.left
+                        || currentRect.top != originalWindowRect.top
+                        || currentRect.right != originalWindowRect.right
+                        || currentRect.bottom != originalWindowRect.bottom) {
+
+                      // 恢復到原始位置和大小
+                      int width = originalWindowRect.right - originalWindowRect.left;
+                      int height = originalWindowRect.bottom - originalWindowRect.top;
+
+                      user32.SetWindowPos(
+                          hWnd,
+                          null,
+                          originalWindowRect.left,
+                          originalWindowRect.top,
+                          width,
+                          height,
+                          0x0004 | 0x0010); // SWP_NOZORDER | SWP_NOACTIVATE
+
+                      logger.debug("視窗位置或大小已恢復到鎖定狀態");
+                    }
+                  }
+
+                  // 每100毫秒檢查一次
+                  Thread.sleep(100);
+                } catch (InterruptedException e) {
+                  logger.info("視窗監控執行緒被中斷");
+                  break;
+                } catch (Exception e) {
+                  logger.error("視窗監控時發生錯誤: {}", e.getMessage());
+                }
+              }
+            });
+
+    windowMonitorThread.setDaemon(true);
+    windowMonitorThread.start();
+  }
+
+  /** 停止監控視窗 */
+  private void stopWindowMonitoring() {
+    isMonitoring = false;
+    if (windowMonitorThread != null && windowMonitorThread.isAlive()) {
+      windowMonitorThread.interrupt();
+    }
+  }
+
   /** 修改視窗大小和位置 */
   public boolean setWindowPosition(long windowHandle, int x, int y, int width, int height) {
     try {
       HWND hWnd = new HWND(new Pointer(windowHandle));
       if (user32.IsWindow(hWnd)) {
+        // 檢查是否為鎖定大小位置的視窗
+        if (isWindowSizePositionLocked && hWnd.equals(lockedSizePositionWindow)) {
+          logger.warn("無法修改鎖定大小位置的視窗");
+          return false;
+        }
+
         // SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010
         boolean success = user32.SetWindowPos(hWnd, null, x, y, width, height, 0x0004 | 0x0010);
         if (success) {
@@ -237,6 +384,12 @@ public class WindowService {
     try {
       HWND hWnd = new HWND(new Pointer(windowHandle));
       if (user32.IsWindow(hWnd)) {
+        // 檢查是否為鎖定大小位置的視窗
+        if (isWindowSizePositionLocked && hWnd.equals(lockedSizePositionWindow)) {
+          logger.warn("無法修改鎖定大小位置的視窗");
+          return false;
+        }
+
         // 先獲取當前視窗大小
         RECT rect = new RECT();
         if (user32.GetWindowRect(hWnd, rect)) {
@@ -257,6 +410,12 @@ public class WindowService {
     try {
       HWND hWnd = new HWND(new Pointer(windowHandle));
       if (user32.IsWindow(hWnd)) {
+        // 檢查是否為鎖定大小位置的視窗
+        if (isWindowSizePositionLocked && hWnd.equals(lockedSizePositionWindow)) {
+          logger.warn("無法修改鎖定大小位置的視窗");
+          return false;
+        }
+
         // 先獲取當前視窗位置
         RECT rect = new RECT();
         if (user32.GetWindowRect(hWnd, rect)) {
